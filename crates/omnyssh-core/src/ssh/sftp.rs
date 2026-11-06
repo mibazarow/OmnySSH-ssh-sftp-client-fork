@@ -1253,7 +1253,8 @@ async fn do_set_mode(
 
 /// Lists the entries of a local directory, sorted dirs-first then alphabetically.
 ///
-/// Prepends a `".."` entry for the parent directory (omitted at filesystem root).
+/// Hidden entries (names starting with `.`) are omitted; remote listings still show
+/// them. Prepends a `".."` entry for the parent directory (omitted at filesystem root).
 ///
 /// # Errors
 /// Returns an error if the directory cannot be read (e.g. permission denied).
@@ -1286,6 +1287,11 @@ pub async fn list_local_dir(path: &str) -> anyhow::Result<Vec<FileEntry>> {
         let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
 
         let name = entry.file_name().to_string_lossy().into_owned();
+        // Dotfiles stay out of the local pane, as the user asked; the remote side still
+        // lists them. Filtering here keeps every local browser consistent.
+        if name.starts_with('.') {
+            continue;
+        }
         let path_str = entry.path().to_string_lossy().into_owned();
 
         entries.push(FileEntry {
@@ -1400,6 +1406,22 @@ mod tests {
         let parent = entries.first().expect("parent entry");
         assert_eq!(parent.name, "..");
         assert!(parent.modified.is_none());
+    }
+
+    #[tokio::test]
+    async fn local_listing_hides_dotfiles() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("visible.txt"), b"hello").expect("write scratch file");
+        std::fs::write(dir.path().join(".env"), b"secret").expect("write scratch file");
+        std::fs::create_dir(dir.path().join(".git")).expect("create scratch dir");
+
+        let entries = list_local_dir(&dir.path().to_string_lossy())
+            .await
+            .expect("list scratch dir");
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"visible.txt"));
+        assert!(!names.contains(&".env"));
+        assert!(!names.contains(&".git"));
     }
 
     #[tokio::test]
