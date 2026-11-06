@@ -160,6 +160,40 @@ export function baseName(path: string): string {
   return path.split(sep).filter(Boolean).at(-1) ?? '';
 }
 
+/** The clickable trail from a root down to a pane's current directory: the root first,
+ *  then each folder. A Windows path (no '/') splits on '\\'; anything else on '/'. Each
+ *  crumb's `path` is the absolute path a click should open. */
+export function pathTrail(path: string): Array<{ label: string; path: string }> {
+  if (!path) return [];
+  const windows = !path.includes('/') && path.includes('\\');
+  if (!windows) {
+    const trail = [{ label: '/', path: '/' }];
+    let acc = '';
+    for (const part of path.split('/').filter(Boolean)) {
+      acc += `/${part}`;
+      trail.push({ label: part, path: acc });
+    }
+    return trail;
+  }
+  const parts = path.split('\\').filter(Boolean);
+  const trail: Array<{ label: string; path: string }> = [];
+  let acc: string;
+  if (path.startsWith('\\\\')) {
+    const server = parts.shift() ?? '';
+    const share = parts.shift();
+    acc = `\\\\${server}${share ? `\\${share}` : ''}`;
+    trail.push({ label: acc, path: `${acc}\\` });
+  } else {
+    acc = parts.shift() ?? '';
+    trail.push({ label: `${acc}\\`, path: `${acc}\\` });
+  }
+  for (const part of parts) {
+    acc += `\\${part}`;
+    trail.push({ label: part, path: acc });
+  }
+  return trail;
+}
+
 /** Human-readable byte size for a listing row or a transfer bar. */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

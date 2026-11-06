@@ -18,6 +18,7 @@ import {
   repeatedName,
   rootOf,
   baseName,
+  pathTrail,
   isPlainName,
   CANCELLED,
   type Pane,
@@ -311,6 +312,36 @@ describe('rootOf', () => {
 
   it('puts every path under / on a single-root system', () => {
     expect(rootOf('/home/me', ['/'])).toBe('/');
+  });
+});
+
+describe('pathTrail', () => {
+  it('walks a server path from the root down', () => {
+    expect(pathTrail('/srv/www/html')).toEqual([
+      { label: '/', path: '/' },
+      { label: 'srv', path: '/srv' },
+      { label: 'www', path: '/srv/www' },
+      { label: 'html', path: '/srv/www/html' }
+    ]);
+  });
+
+  it('walks a drive path from its root down', () => {
+    expect(pathTrail('C:\\Users\\me')).toEqual([
+      { label: 'C:\\', path: 'C:\\' },
+      { label: 'Users', path: 'C:\\Users' },
+      { label: 'me', path: 'C:\\Users\\me' }
+    ]);
+  });
+
+  it('walks a share from its root down', () => {
+    expect(pathTrail('\\\\nas\\share\\album')).toEqual([
+      { label: '\\\\nas\\share', path: '\\\\nas\\share\\' },
+      { label: 'album', path: '\\\\nas\\share\\album' }
+    ]);
+  });
+
+  it('has no trail for an empty path', () => {
+    expect(pathTrail('')).toEqual([]);
   });
 });
 

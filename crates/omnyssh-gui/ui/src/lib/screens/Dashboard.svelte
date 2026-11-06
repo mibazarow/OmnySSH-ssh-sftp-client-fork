@@ -1,6 +1,6 @@
 <script lang="ts">
-  // Server-card grid (tech-gui.md §2, 2.1): one card per host with live health and
-  // detected services. Colour is reserved for semantic state — the header dot and
+  // Server-card grid (tech-gui.md §2, 2.1): one card per host with live health.
+  // Colour is reserved for semantic state — the header dot and
   // the metric fills read from `statusToken`; everything else is ink-on-paper. The
   // per-card `sh`/`files` buttons are the host-first spawn path (§2). Host management
   // (add/edit/delete, §4.1) lives here — there is no separate Hosts screen (§2).
@@ -9,7 +9,7 @@
   import { onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
   import type { HostDto, HostInputDto } from '$lib/bindings';
-  import { Surface, Chip, StatusDot, Icon, Button, statusToken } from '$lib/theme';
+  import { Surface, StatusDot, Icon, Button, statusToken } from '$lib/theme';
   import {
     serverCards,
     filterHosts,
@@ -754,25 +754,6 @@
             </div>
           {/each}
         </div>
-
-        {#if card.uptime || card.osInfo}
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-            {#if card.uptime}<span>up {card.uptime}</span>{/if}
-            {#if card.uptime && card.osInfo}<span class="text-faint">·</span>{/if}
-            {#if card.osInfo}<span class="min-w-0 truncate">{card.osInfo}</span>{/if}
-          </div>
-        {/if}
-
-        {#if card.topProcesses.length}
-          <ul class="space-y-1">
-            {#each card.topProcesses as proc, p (p)}
-              <li class="flex items-center justify-between gap-3 text-xs">
-                <span class="min-w-0 truncate font-mono text-muted">{proc.name}</span>
-                <span class="shrink-0 tabular-nums text-faint">{Math.round(proc.cpuPercent)}%</span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
       {/if}
 
       <!-- Why it is down. It can name hosts and addresses, so streamer mode keeps it off screen.
@@ -781,17 +762,6 @@
         <p class="select-text break-words text-xs text-status-crit">
           {$streamerMode ? 'Details hidden in streamer mode' : card.failure}
         </p>
-      {/if}
-
-      <!-- Detected services -->
-      {#if card.detectedServices.length}
-        <div class="flex flex-wrap gap-1.5">
-          {#each card.detectedServices as service (service.kind)}
-            <Chip>{service.detail ? `${service.name} · ${service.detail}` : service.name}</Chip>
-          {/each}
-        </div>
-      {:else if card.servicesError}
-        <div class="text-xs text-faint">Service scan unavailable</div>
       {/if}
 
       <!-- Port forwarding: one tunnel per host carries every forward. -->

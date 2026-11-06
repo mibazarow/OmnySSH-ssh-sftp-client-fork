@@ -235,6 +235,11 @@
     else refreshRemote(entry.path);
   }
 
+  function navigatePath(side: PaneSide, path: string): void {
+    if (side === 'local') void refreshLocal(path);
+    else refreshRemote(path);
+  }
+
   function toggleMark(side: PaneSide, path: string): void {
     if (backendId != null) sftp.toggleMark(backendId, side, path);
   }
@@ -752,6 +757,7 @@
         dropActive={drag?.target?.side === 'local'}
         dropDir={drag?.target?.side === 'local' ? drag.target.row : undefined}
         onNavigate={guarded((e) => navigate('local', e))}
+        onNavigatePath={(path) => navigatePath('local', path)}
         onToggleMark={(p) => toggleMark('local', p)}
         onPreview={guarded((e) => void openEntry('local', e))}
         onDragStart={(entry, e) => startPress('local', entry, e)}
@@ -807,6 +813,7 @@
         dropActive={drag?.target?.side === 'remote' || osDrop != null}
         dropDir={drag?.target?.side === 'remote' ? drag.target.row : osDrop?.row}
         onNavigate={guarded((e) => navigate('remote', e))}
+        onNavigatePath={(path) => navigatePath('remote', path)}
         onToggleMark={(p) => toggleMark('remote', p)}
         onPreview={guarded((e) => void openEntry('remote', e))}
         onDragStart={(entry, e) => startPress('remote', entry, e)}

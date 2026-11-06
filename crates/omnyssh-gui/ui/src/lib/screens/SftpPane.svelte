@@ -7,10 +7,18 @@
   // `data-dir-path` are how the parent finds the pane and folder under the pointer.
   // A listing on its way dims the current one: a remote one can wait behind a transfer.
   // Semantic tokens only — no colour literals (§5.1).
+  import { onDestroy } from 'svelte';
   import type { Snippet } from 'svelte';
   import { Icon } from '$lib/theme';
   import type { FileEntryDto } from '$lib/bindings';
-  import { formatBytes, formatDate, type Pane, type PaneSide } from '$lib/stores/sftp';
+  import {
+    formatBytes,
+    formatDate,
+    pathTrail,
+    type Pane,
+    type PaneSide
+  } from '$lib/stores/sftp';
+  import { lastError } from '$lib/stores/notifications';
   import { maskText } from '$lib/stores/streamer';
 
   let {
@@ -20,6 +28,7 @@
     dropActive = false,
     dropDir,
     onNavigate,
+    onNavigatePath,
     onToggleMark,
     onPreview,
     onDragStart,
@@ -34,6 +43,8 @@
     /** The folder row under the pointer while this pane is the drop target. */
     dropDir?: string;
     onNavigate: (entry: FileEntryDto) => void;
+    /** Open a directory path from the breadcrumb trail. */
+    onNavigatePath: (path: string) => void;
     onToggleMark: (path: string) => void;
     onPreview: (entry: FileEntryDto) => void;
     onDragStart?: (entry: FileEntryDto, event: PointerEvent) => void;
@@ -41,6 +52,28 @@
     onContextMenu?: (entry: FileEntryDto, event: MouseEvent) => void;
     toolbar?: Snippet;
   } = $props();
+
+  const trail = $derived(pathTrail(pane.path));
+
+  let copied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
+
+  onDestroy(() => {
+    if (copyTimer !== undefined) clearTimeout(copyTimer);
+  });
+
+  async function copyPath(): Promise<void> {
+    if (!pane.path) return;
+    try {
+      await navigator.clipboard.writeText(pane.path);
+    } catch (err) {
+      lastError.set(`Copy failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    copied = true;
+    if (copyTimer !== undefined) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => (copied = false), 1200);
+  }
 
   const rowBase =
     'flex w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition ' +
@@ -70,7 +103,45 @@
       </div>
     </div>
     <div class="mt-1 flex items-center gap-2 text-xs text-faint">
-      <span class="min-w-0 truncate font-mono" title={pane.path}>{pane.path || '—'}</span>
+      {#if pane.path}
+        <nav
+          class="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0.5"
+          aria-label="Current path"
+          title={pane.path}
+        >
+          {#each trail as crumb, i (crumb.path)}
+            {#if i > 0}
+              <span class="shrink-0" aria-hidden="true">›</span>
+            {/if}
+            {#if i === trail.length - 1}
+              <span class="font-mono font-medium text-muted" aria-current="page">{crumb.label}</span>
+            {:else}
+              <button
+                type="button"
+                class="rounded px-1 py-0.5 font-mono transition hover:bg-surface-inset hover:text-fg
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                title={crumb.path}
+                onclick={() => onNavigatePath(crumb.path)}
+              >
+                {crumb.label}
+              </button>
+            {/if}
+          {/each}
+        </nav>
+        <button
+          type="button"
+          class="shrink-0 rounded p-1 transition hover:bg-surface-inset hover:text-fg
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus
+            {copied ? 'text-status-ok' : ''}"
+          title={copied ? 'Copied' : 'Copy path'}
+          aria-label="Copy current path"
+          onclick={() => void copyPath()}
+        >
+          <Icon name={copied ? 'check' : 'copy'} size={12} />
+        </button>
+      {:else}
+        <span>—</span>
+      {/if}
       {#if pane.loading && pane.entries.length > 0}
         <span class="shrink-0">Loading…</span>
       {/if}

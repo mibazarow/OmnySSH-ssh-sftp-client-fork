@@ -30,4 +30,5 @@ export type IconName =
   | 'tunnel'
   | 'layers'
   | 'chevron'
-  | 'grip';
+  | 'grip'
+  | 'copy';
