@@ -38,7 +38,9 @@ use tauri::Manager;
 use tauri_plugin_window_state::StateFlags;
 use tauri_specta::{collect_commands, collect_events, Builder};
 
-// Absolute at build time, so the export target is independent of the run CWD.
+// Absolute at build time, so the export target is independent of the run CWD. Only the
+// dev export and the bindings-sync test read it, so a release build does not carry it.
+#[cfg(any(debug_assertions, test))]
 const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/ui/src/lib/bindings.ts");
 
 /// How long the hidden window may wait for the page before it is revealed anyway.

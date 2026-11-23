@@ -240,30 +240,33 @@
     else refreshRemote(path);
   }
 
-  function toggleMark(side: PaneSide, path: string, e?: MouseEvent): void {
+  // Shift extends the range from the last row clicked, Cmd/Ctrl toggles one row — the
+  // same on a checkbox and on the row itself. True when the click was a selection, so a
+  // row click does not also open the entry.
+  function selectWithModifiers(side: PaneSide, path: string, e: MouseEvent): boolean {
     const id = backendId;
-    if (id == null) return;
-    if (e?.shiftKey) sftp.selectRange(id, side, path, e.metaKey || e.ctrlKey);
-    else sftp.toggleMark(id, side, path);
+    if (id == null) return false;
+    if (e.shiftKey) sftp.selectRange(id, side, path, e.metaKey || e.ctrlKey);
+    else if (e.metaKey || e.ctrlKey) sftp.toggleMark(id, side, path);
+    else return false;
+    return true;
   }
 
-  // A row click: Shift extends the selection from the last row clicked, Cmd/Ctrl
-  // toggles that row, and a plain click opens it as before (marking it as the anchor
-  // a later Shift-click ranges from).
+  // A checkbox click: modifiers select as above, a plain click toggles the mark.
+  function toggleMark(side: PaneSide, path: string, e: MouseEvent): void {
+    const id = backendId;
+    if (id != null && !selectWithModifiers(side, path, e)) sftp.toggleMark(id, side, path);
+  }
+
+  // A row click: a selection modifier selects, a plain click opens the entry and
+  // remembers it as the anchor a later Shift-click ranges from.
   function clickRow(side: PaneSide, entry: FileEntryDto, e: MouseEvent): void {
     if (swallowClick || backendId == null) return;
     if (entry.name === '..') {
       navigate(side, entry);
       return;
     }
-    if (e.shiftKey) {
-      sftp.selectRange(backendId, side, entry.path, e.metaKey || e.ctrlKey);
-      return;
-    }
-    if (e.metaKey || e.ctrlKey) {
-      sftp.toggleMark(backendId, side, entry.path);
-      return;
-    }
+    if (selectWithModifiers(side, entry.path, e)) return;
     sftp.focusEntry(backendId, side, entry.path);
     if (entry.isDir) navigate(side, entry);
     else void openEntry(side, entry);
@@ -338,15 +341,16 @@
     refreshRemote(parentOf(path));
   }
 
-  function deleteEntry(side: PaneSide, entry: FileEntryDto): void {
+  // Deletes remote entries, one queued behind the other.
+  function deleteRemote(entries: FileEntryDto[]): void {
     const id = backendId;
-    if (id == null || side !== 'remote') return;
-    enqueue([
-      () => {
+    if (id == null) return;
+    enqueue(
+      entries.map((entry) => () => {
         sftp.pushOp(id, { kind: 'delete', name: entry.name, refresh: 'remote' });
         void sftpDelete(id, entry.path).catch(onDispatchError(id));
-      }
-    ]);
+      })
+    );
   }
 
   // The right-click menu for one row: what can be done to it on its own side.
@@ -376,7 +380,7 @@
         label: 'Delete',
         icon: 'trash',
         danger: true,
-        run: () => deleteEntry('remote', entry)
+        run: () => deleteRemote([entry])
       });
     }
     return items;
@@ -651,14 +655,7 @@
   }
 
   function remove(): void {
-    const id = backendId;
-    if (id == null) return;
-    enqueue(
-      remoteMarked.map((entry) => () => {
-        sftp.pushOp(id, { kind: 'delete', name: entry.name, refresh: 'remote' });
-        void sftpDelete(id, entry.path).catch(onDispatchError(id));
-      })
-    );
+    deleteRemote(remoteMarked);
   }
 
   function openPrompt(kind: 'mkdir' | 'rename'): void {
