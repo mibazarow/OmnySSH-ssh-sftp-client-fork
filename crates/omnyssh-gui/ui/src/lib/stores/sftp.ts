@@ -17,6 +17,8 @@ export interface Pane {
   loading: boolean;
   /** Marked entry paths — the batch transfer/delete targets. */
   marked: Set<string>;
+  /** The row a shift-click ranges from: the last row clicked. */
+  anchor?: string;
   error?: string;
 }
 
@@ -79,7 +81,15 @@ export function newSession(hostName: string): SftpSession {
 
 /** A directory listing landed for a pane: replace entries at `path`, clear marks. */
 export function applyListing(pane: Pane, path: string, entries: FileEntryDto[]): Pane {
-  return { ...pane, path, entries, loading: false, marked: new Set(), error: undefined };
+  return {
+    ...pane,
+    path,
+    entries,
+    loading: false,
+    marked: new Set(),
+    anchor: undefined,
+    error: undefined
+  };
 }
 
 /** Toggle an entry's marked state (the batch transfer/delete set). */
@@ -87,6 +97,29 @@ export function toggleMark(pane: Pane, path: string): Pane {
   const marked = new Set(pane.marked);
   if (marked.has(path)) marked.delete(path);
   else marked.add(path);
+  return { ...pane, marked, anchor: path };
+}
+
+/** Move the shift-click anchor without changing the selection (a plain row click). */
+export function focusEntry(pane: Pane, path: string): Pane {
+  return { ...pane, anchor: path };
+}
+
+/** Select the range from the anchor to `path`, Finder-style. Without `additive`
+ *  (Shift alone) the range replaces the selection; with it (Shift+Cmd) the range
+ *  joins it. No anchor yet selects just `path`. The `..` row is never selected. */
+export function selectRange(pane: Pane, path: string, additive = false): Pane {
+  const paths = pane.entries.filter((e) => e.name !== '..').map((e) => e.path);
+  const to = paths.indexOf(path);
+  if (to < 0) return pane;
+  const marked = additive ? new Set(pane.marked) : new Set<string>();
+  const from = pane.anchor != null ? paths.indexOf(pane.anchor) : -1;
+  if (from < 0) {
+    marked.add(path);
+    return { ...pane, marked, anchor: path };
+  }
+  const [lo, hi] = from <= to ? [from, to] : [to, from];
+  for (let i = lo; i <= hi; i += 1) marked.add(paths[i]);
   return { ...pane, marked };
 }
 
@@ -316,6 +349,14 @@ function createSftp() {
     },
     toggleMark(id: number, side: PaneSide, path: string): void {
       mut(id, (s) => ({ ...s, [side]: toggleMark(s[side], path) }));
+    },
+    /** A plain row click: remember where a later Shift-click ranges from. */
+    focusEntry(id: number, side: PaneSide, path: string): void {
+      mut(id, (s) => ({ ...s, [side]: focusEntry(s[side], path) }));
+    },
+    /** Shift-click: mark the range from the anchor to `path`. */
+    selectRange(id: number, side: PaneSide, path: string, additive = false): void {
+      mut(id, (s) => ({ ...s, [side]: selectRange(s[side], path, additive) }));
     },
     pushOp(id: number, op: PendingOp): void {
       mut(id, (s) => ({ ...s, pending: [...s.pending, op] }));

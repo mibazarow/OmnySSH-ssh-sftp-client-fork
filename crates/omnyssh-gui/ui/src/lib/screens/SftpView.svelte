@@ -240,8 +240,33 @@
     else refreshRemote(path);
   }
 
-  function toggleMark(side: PaneSide, path: string): void {
-    if (backendId != null) sftp.toggleMark(backendId, side, path);
+  function toggleMark(side: PaneSide, path: string, e?: MouseEvent): void {
+    const id = backendId;
+    if (id == null) return;
+    if (e?.shiftKey) sftp.selectRange(id, side, path, e.metaKey || e.ctrlKey);
+    else sftp.toggleMark(id, side, path);
+  }
+
+  // A row click: Shift extends the selection from the last row clicked, Cmd/Ctrl
+  // toggles that row, and a plain click opens it as before (marking it as the anchor
+  // a later Shift-click ranges from).
+  function clickRow(side: PaneSide, entry: FileEntryDto, e: MouseEvent): void {
+    if (swallowClick || backendId == null) return;
+    if (entry.name === '..') {
+      navigate(side, entry);
+      return;
+    }
+    if (e.shiftKey) {
+      sftp.selectRange(backendId, side, entry.path, e.metaKey || e.ctrlKey);
+      return;
+    }
+    if (e.metaKey || e.ctrlKey) {
+      sftp.toggleMark(backendId, side, entry.path);
+      return;
+    }
+    sftp.focusEntry(backendId, side, entry.path);
+    if (entry.isDir) navigate(side, entry);
+    else void openEntry(side, entry);
   }
 
   async function preview(side: PaneSide, entry: FileEntryDto): Promise<void> {
@@ -625,12 +650,6 @@
     upload(items.filter((item) => item.name), dir);
   }
 
-  function guarded<T>(fn: (arg: T) => void): (arg: T) => void {
-    return (arg) => {
-      if (!swallowClick) fn(arg);
-    };
-  }
-
   function remove(): void {
     const id = backendId;
     if (id == null) return;
@@ -756,10 +775,9 @@
         pane={view.local}
         dropActive={drag?.target?.side === 'local'}
         dropDir={drag?.target?.side === 'local' ? drag.target.row : undefined}
-        onNavigate={guarded((e) => navigate('local', e))}
         onNavigatePath={(path) => navigatePath('local', path)}
-        onToggleMark={(p) => toggleMark('local', p)}
-        onPreview={guarded((e) => void openEntry('local', e))}
+        onToggleMark={(p, e) => toggleMark('local', p, e)}
+        onRowClick={(entry, e) => clickRow('local', entry, e)}
         onDragStart={(entry, e) => startPress('local', entry, e)}
         onContextMenu={(entry, e) => openMenu('local', entry, e)}
       >
@@ -812,10 +830,9 @@
         pane={view.remote}
         dropActive={drag?.target?.side === 'remote' || osDrop != null}
         dropDir={drag?.target?.side === 'remote' ? drag.target.row : osDrop?.row}
-        onNavigate={guarded((e) => navigate('remote', e))}
         onNavigatePath={(path) => navigatePath('remote', path)}
-        onToggleMark={(p) => toggleMark('remote', p)}
-        onPreview={guarded((e) => void openEntry('remote', e))}
+        onToggleMark={(p, e) => toggleMark('remote', p, e)}
+        onRowClick={(entry, e) => clickRow('remote', entry, e)}
         onDragStart={(entry, e) => startPress('remote', entry, e)}
         onContextMenu={(entry, e) => openMenu('remote', entry, e)}
       >

@@ -1,10 +1,11 @@
 <script lang="ts">
   // One side of the dual-pane SFTP browser (tech-gui.md §3.2): a current-path header
   // with a parent-supplied toolbar, then the entry list. Clicking a directory (or the
-  // `..` row) navigates; clicking a file previews; the leading checkbox marks it for a
-  // batch transfer/delete. A press on a row may start a drag (the parent owns the drag
-  // and marks the pane `dropActive` while it is the target); `data-pane` and
-  // `data-dir-path` are how the parent finds the pane and folder under the pointer.
+  // `..` row) navigates; clicking a file previews; Shift-click selects a range and
+  // Cmd/Ctrl-click toggles one row (the parent owns both). The leading checkbox marks
+  // a row for a batch transfer/delete. A press on a row may start a drag (the parent
+  // owns the drag and marks the pane `dropActive` while it is the target); `data-pane`
+  // and `data-dir-path` are how the parent finds the pane and folder under the pointer.
   // A listing on its way dims the current one: a remote one can wait behind a transfer.
   // Semantic tokens only — no colour literals (§5.1).
   import { onDestroy } from 'svelte';
@@ -27,10 +28,9 @@
     pane,
     dropActive = false,
     dropDir,
-    onNavigate,
     onNavigatePath,
     onToggleMark,
-    onPreview,
+    onRowClick,
     onDragStart,
     onContextMenu,
     toolbar
@@ -42,11 +42,12 @@
     dropActive?: boolean;
     /** The folder row under the pointer while this pane is the drop target. */
     dropDir?: string;
-    onNavigate: (entry: FileEntryDto) => void;
     /** Open a directory path from the breadcrumb trail. */
     onNavigatePath: (path: string) => void;
-    onToggleMark: (path: string) => void;
-    onPreview: (entry: FileEntryDto) => void;
+    /** A checkbox click; the event's modifiers make it a range or a toggle. */
+    onToggleMark: (path: string, event: MouseEvent) => void;
+    /** A row click: opens it, or selects it with Shift / Cmd held. */
+    onRowClick: (entry: FileEntryDto, event: MouseEvent) => void;
     onDragStart?: (entry: FileEntryDto, event: PointerEvent) => void;
     /** Right-click on a row: the parent opens its actions menu at the pointer. */
     onContextMenu?: (entry: FileEntryDto, event: MouseEvent) => void;
@@ -171,7 +172,9 @@
           {@const marked = pane.marked.has(entry.path)}
           {@const dropHere = dropActive && entry.isDir && dropDir === entry.path}
           <li
-            class="flex items-center gap-1.5 rounded {dropHere ? 'ring-2 ring-accent' : ''}"
+            class="flex items-center gap-1.5 rounded transition
+              {dropHere ? 'ring-2 ring-accent' : ''}
+              {marked ? 'bg-surface-inset ring-1 ring-inset ring-accent' : ''}"
             data-dir-path={entry.isDir ? entry.path : undefined}
           >
             {#if isParent}
@@ -185,7 +188,7 @@
                 class="grid h-4 w-4 shrink-0 place-items-center rounded border transition
                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus
                   {marked ? 'border-accent bg-accent text-accent-fg' : 'border-strong text-transparent'}"
-                onclick={() => onToggleMark(entry.path)}
+                onclick={(e) => onToggleMark(entry.path, e)}
               >
                 {#if marked}<Icon name="check" size={11} />{/if}
               </button>
@@ -194,7 +197,7 @@
               type="button"
               class="{rowBase} text-muted hover:bg-surface-inset hover:text-fg"
               title={entry.name}
-              onclick={() => (entry.isDir ? onNavigate(entry) : onPreview(entry))}
+              onclick={(e) => onRowClick(entry, e)}
               onpointerdown={(e) => onDragStart?.(entry, e)}
               oncontextmenu={(e) => {
                 e.preventDefault();

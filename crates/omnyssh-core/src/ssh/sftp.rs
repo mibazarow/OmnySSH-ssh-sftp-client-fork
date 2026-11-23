@@ -122,7 +122,8 @@ pub enum SftpCommand {
         remote: String,
         transfer_id: TransferId,
     },
-    /// Delete a remote file (falls back to removing an empty directory).
+    /// Delete a remote path: a file, a symbolic link, or a folder with everything
+    /// in it.
     Delete(String),
     /// Create a remote directory.
     MkDir(String),
@@ -368,11 +369,7 @@ async fn sftp_task_loop(
             }
 
             SftpCommand::Delete(path) => {
-                // Try remove_file first; on failure try remove_dir (empty dirs only).
-                let result = match sftp.remove_file(&path).await {
-                    Ok(()) => Ok(()),
-                    Err(_) => sftp.remove_dir(&path).await.map_err(|e| e.to_string()),
-                };
+                let result = do_delete(&sftp, &path).await.map_err(|e| format!("{e:#}"));
                 let _ = event_tx.send(CoreEvent::SftpOpDone { result }).await;
             }
 
@@ -477,6 +474,51 @@ async fn do_list_dir(
     });
 
     Ok(entries)
+}
+
+/// Deletes a remote path: a file or symbolic link, or a folder with everything
+/// below it. Folders are walked depth-first; a symlink inside one is removed as a
+/// link, never followed.
+async fn do_delete(sftp: &russh_sftp::client::SftpSession, path: &str) -> anyhow::Result<()> {
+    let meta = sftp
+        .symlink_metadata(path)
+        .await
+        .with_context(|| format!("read remote metadata '{path}'"))?;
+    if meta.file_type().is_dir() {
+        delete_remote_dir(sftp, path, 0).await
+    } else {
+        sftp.remove_file(path)
+            .await
+            .with_context(|| format!("delete remote file '{path}'"))
+    }
+}
+
+async fn delete_remote_dir(
+    sftp: &russh_sftp::client::SftpSession,
+    path: &str,
+    depth: usize,
+) -> anyhow::Result<()> {
+    if depth > MAX_DEPTH {
+        anyhow::bail!("remote folder '{path}' is deeper than {MAX_DEPTH} levels");
+    }
+    let read_dir = sftp
+        .read_dir(path)
+        .await
+        .with_context(|| format!("read remote dir '{path}'"))?;
+    for entry in read_dir {
+        let name = entry.file_name();
+        let full_path = join_remote(path, &name);
+        if entry.file_type().is_dir() {
+            Box::pin(delete_remote_dir(sftp, &full_path, depth + 1)).await?;
+        } else {
+            sftp.remove_file(&full_path)
+                .await
+                .with_context(|| format!("delete remote file '{full_path}'"))?;
+        }
+    }
+    sftp.remove_dir(path)
+        .await
+        .with_context(|| format!("delete remote dir '{path}'"))
 }
 
 /// `name` joined onto the remote directory `dir`.
@@ -1959,6 +2001,39 @@ mod tests {
         // The server exits once the session drops its end of the pipes.
         let pipes = tokio::io::join(child.stdout.take()?, child.stdin.take()?);
         russh_sftp::client::SftpSession::new(pipes).await.ok()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_folder_is_deleted_with_everything_in_it() {
+        let Some(sftp) = local_sftp(&[]).await else {
+            eprintln!("no sftp-server on this machine; skipped");
+            return;
+        };
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = |rel: &str| tmp.path().join(rel);
+        let str_of = |rel: &str| path(rel).to_str().expect("utf-8 temp dir").to_string();
+        std::fs::create_dir_all(path("tree/a/b")).expect("mkdir");
+        std::fs::create_dir(path("tree/empty")).expect("mkdir");
+        std::fs::write(path("tree/a/b/file.txt"), "data").expect("write");
+        std::fs::write(path("outside.txt"), "keep me").expect("write");
+        std::os::unix::fs::symlink(path("outside.txt"), path("tree/link")).expect("symlink");
+
+        do_delete(&sftp, &str_of("tree"))
+            .await
+            .expect("folder deleted");
+        assert!(!path("tree").exists(), "the whole tree is gone");
+        assert_eq!(
+            std::fs::read(path("outside.txt")).expect("read"),
+            b"keep me",
+            "a symlink is removed, not followed"
+        );
+
+        std::fs::write(path("lone.txt"), "data").expect("write");
+        do_delete(&sftp, &str_of("lone.txt"))
+            .await
+            .expect("file deleted");
+        assert!(!path("lone.txt").exists());
     }
 
     #[cfg(unix)]

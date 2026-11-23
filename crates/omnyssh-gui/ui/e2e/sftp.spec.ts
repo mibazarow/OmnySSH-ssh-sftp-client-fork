@@ -108,10 +108,12 @@ async function boot(
       const chmods: Array<{ path: string; mode: number }> = [];
       const renames: Array<{ from: string; to: string }> = [];
       const localRenames: Array<{ from: string; to: string }> = [];
+      const deletes: string[] = [];
       (win as { __writes?: unknown }).__writes = writes;
       (win as { __chmods?: unknown }).__chmods = chmods;
       (win as { __renames?: unknown }).__renames = renames;
       (win as { __localRenames?: unknown }).__localRenames = localRenames;
+      (win as { __deletes?: unknown }).__deletes = deletes;
 
       function parentOf(p: string): string {
         const i = p.lastIndexOf('/');
@@ -261,6 +263,16 @@ async function boot(
               writes.push({ path, content });
               return Promise.resolve(null);
             }
+            case 'sftp_delete': {
+              const { sessionId, path } = args as { sessionId: number; path: string };
+              deletes.push(path);
+              const parent = parentOf(path);
+              const name = baseName(path);
+              if (remote[parent]) remote[parent] = remote[parent].filter((e) => e.name !== name);
+              delete remote[path];
+              setTimeout(() => fireEvent('sftp-op-done', { sessionId, ok: true }), 0);
+              return Promise.resolve(null);
+            }
             case 'sftp_stat': {
               const { path } = args as { path: string };
               const entry = Object.values(remote)
@@ -337,6 +349,42 @@ test('host-first: a card’s files opens SFTP and browses both sides', async ({ 
   // Both panes list their own filesystem, from distinct commands (local direct, remote event).
   await expect(localPane.getByText('notes.txt')).toBeVisible();
   await expect(remotePane.getByText('config.yml')).toBeVisible();
+});
+
+test('Shift selects a range and Cmd takes rows out of it, as in Finder', async ({ page }) => {
+  await boot(page);
+  await page.getByTitle('files on web-1').click();
+  const localPane = page.getByRole('region', { name: 'Local' });
+  const notes = localPane.getByTitle('notes.txt', { exact: true });
+  const work = localPane.getByTitle('work', { exact: true });
+  const notesBox = localPane.getByRole('checkbox', { name: 'Mark notes.txt' });
+  const workBox = localPane.getByRole('checkbox', { name: 'Mark work' });
+  await expect(notes).toBeVisible();
+
+  // Cmd-click sets the anchor without opening; Shift-click marks the range.
+  await notes.click({ modifiers: ['Meta'] });
+  await work.click({ modifiers: ['Shift'] });
+  await expect(notesBox).toHaveAttribute('aria-checked', 'true');
+  await expect(workBox).toHaveAttribute('aria-checked', 'true');
+
+  // Cmd-click again takes one row out, leaving the other marked.
+  await notes.click({ modifiers: ['Meta'] });
+  await expect(notesBox).toHaveAttribute('aria-checked', 'false');
+  await expect(workBox).toHaveAttribute('aria-checked', 'true');
+});
+
+test('Delete removes a marked remote folder, not just files', async ({ page }) => {
+  await boot(page);
+  await page.getByTitle('files on web-1').click();
+  const remotePane = page.getByRole('region', { name: 'web-1' });
+  await expect(remotePane.getByTitle('var', { exact: true })).toBeVisible();
+
+  await remotePane.getByRole('checkbox', { name: 'Mark var' }).click();
+  await page.getByRole('button', { name: 'Delete marked entries' }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __deletes: string[] }).__deletes))
+    .toEqual(['/var']);
+  await expect(remotePane.getByTitle('var', { exact: true })).toHaveCount(0);
 });
 
 test('round-trip: upload a local file to the remote, then download a remote file', async ({

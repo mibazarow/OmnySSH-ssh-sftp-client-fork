@@ -6,6 +6,8 @@ import {
   newSession,
   applyListing,
   toggleMark,
+  focusEntry,
+  selectRange,
   markedEntries,
   mergeRefresh,
   applyProgress,
@@ -140,13 +142,14 @@ describe('sftp reducers', () => {
   });
 
   it('applyListing replaces entries at a path and clears marks + loading', () => {
-    const pane = paneWith([entry('a')], ['/srv/a']);
+    const pane = { ...paneWith([entry('a')], ['/srv/a']), anchor: '/srv/a' };
     const next = applyListing(pane, '/etc', [entry('b'), entry('c')]);
     expect(next.path).toBe('/etc');
     expect(next.entries.map((e) => e.name)).toEqual(['b', 'c']);
     expect(next.loading).toBe(false);
-    // Navigating clears the previous directory's marks.
+    // Navigating clears the previous directory's marks and anchor.
     expect(next.marked.size).toBe(0);
+    expect(next.anchor).toBeUndefined();
   });
 
   it('toggleMark marks and unmarks, and markedEntries keeps listing order', () => {
@@ -157,6 +160,47 @@ describe('sftp reducers', () => {
     // Toggling an already-marked path removes it.
     pane = toggleMark(pane, '/srv/a');
     expect(markedEntries(pane).map((e) => e.name)).toEqual(['c']);
+  });
+
+  it('toggleMark makes the toggled row the anchor a Shift-click ranges from', () => {
+    const pane = toggleMark(paneWith([entry('a'), entry('b')]), '/srv/a');
+    expect(pane.anchor).toBe('/srv/a');
+  });
+
+  it('a plain click moves the anchor without changing the marks', () => {
+    const pane = focusEntry(paneWith([entry('a'), entry('b')], ['/srv/b']), '/srv/a');
+    expect(pane.anchor).toBe('/srv/a');
+    expect(markedEntries(pane).map((e) => e.name)).toEqual(['b']);
+  });
+
+  it('Shift-click selects the range from the anchor, either direction', () => {
+    const listing = [entry('..', true), entry('a'), entry('b'), entry('c'), entry('d')];
+    let pane = focusEntry(paneWith(listing), '/srv/b');
+    pane = selectRange(pane, '/srv/d');
+    expect(markedEntries(pane).map((e) => e.name)).toEqual(['b', 'c', 'd']);
+    // The anchor stays put, so another Shift-click ranges from it again.
+    expect(pane.anchor).toBe('/srv/b');
+    pane = selectRange(pane, '/srv/a');
+    expect(markedEntries(pane).map((e) => e.name)).toEqual(['a', 'b']);
+  });
+
+  it('Shift-click without an anchor selects just that row', () => {
+    const pane = selectRange(paneWith([entry('..', true), entry('a'), entry('b')]), '/srv/b');
+    expect(markedEntries(pane).map((e) => e.name)).toEqual(['b']);
+    expect(pane.anchor).toBe('/srv/b');
+  });
+
+  it('Shift+Cmd adds the range to the selection instead of replacing it', () => {
+    const listing = [entry('a'), entry('b'), entry('c'), entry('d')];
+    let pane = paneWith(listing, ['/srv/a']);
+    pane = { ...pane, anchor: '/srv/b' };
+    pane = selectRange(pane, '/srv/c', true);
+    expect(markedEntries(pane).map((e) => e.name)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('never selects the parent row, and leaves a stale anchor alone', () => {
+    const pane = paneWith([{ ...entry('..', true), path: '/' }, entry('a')], ['/srv/a']);
+    expect(selectRange(pane, '/', false)).toBe(pane);
   });
 
   it('mergeRefresh widens two different sides to both', () => {
